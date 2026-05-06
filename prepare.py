@@ -1,7 +1,7 @@
 """
 FROZEN -- Do not modify this file.
-Data loading, train/val split, evaluation metric, and plotting for 
-Online Shoppers Purchasing Intention Project.
+Handles data loading, evaluation, matrix logging, performance plotting, 
+and error taxonomy for the AutoResearch Agent.
 """
 import numpy as np
 import pandas as pd
@@ -10,11 +10,14 @@ from sklearn.metrics import roc_auc_score, f1_score
 import matplotlib.pyplot as plt
 import csv
 import os
+import time
+import traceback
 
 # ── Constants ──────────────────────────────────────────────
 RANDOM_SEED = 42
 VAL_FRACTION = 0.2
 RESULTS_FILE = "results.tsv"
+ERROR_FILE = "errors.log"
 DATA_PATH = "online_shoppers_WORK.csv"
 
 # ── Data ───────────────────────────────────────────────────
@@ -24,114 +27,79 @@ def load_data():
         raise FileNotFoundError(f"Could not find {DATA_PATH}. Ensure you ran the vault split script.")
     
     df = pd.read_csv(DATA_PATH)
-    
-    # Target: Revenue. Features: Drop target and Month (to avoid seasonal bias)
     X = df.drop(['Revenue', 'Month'], axis=1)
     y = df['Revenue'].astype(int)
     
-    # Split into Train and Validation
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=VAL_FRACTION, random_state=RANDOM_SEED, stratify=y
     )
-    
     return X_train, y_train, X_val, y_val, X.columns.tolist()
 
-
-# ── Evaluation (frozen metrics) ───────────────────────────
+# ── Evaluation ─────────────────────────────────────────────
 def evaluate(model, X_val, y_val):
-    """Compute validation ROC AUC and F1-Score (higher is better)."""
+    """Compute validation metrics."""
     y_prob = model.predict_proba(X_val)[:, 1]
     y_pred = model.predict(X_val)
     
     auc = float(roc_auc_score(y_val, y_prob))
     f1 = float(f1_score(y_val, y_pred))
-    
     return auc, f1
 
-
-# ── Logging ────────────────────────────────────────────────
-def log_result(experiment_id, val_auc, val_f1, status, description):
-    """Append one row to results.tsv."""
+# ── Logging: Experiment-Result Matrix ──────────────────────
+def log_result(run_number, auc, f1, num_features, run_time, status, description):
+    """Update the results.tsv matrix with comprehensive metadata."""
     file_exists = os.path.exists(RESULTS_FILE)
+    
+    # Extract model/hyperparameter info from description for the matrix
     with open(RESULTS_FILE, "a", newline="") as f:
         writer = csv.writer(f, delimiter="\t")
         if not file_exists:
-            writer.writerow(["experiment", "val_auc", "val_f1", "status", "description"])
-        writer.writerow([experiment_id, f"{val_auc:.6f}", f"{val_f1:.6f}", status, description])
+            writer.writerow([
+                "run_number", "auc_score", "f1_score", "num_features", 
+                "run_time_sec", "status", "model_metadata"
+            ])
+        writer.writerow([
+            run_number, f"{auc:.6f}", f"{f1:.6f}", num_features, 
+            f"{run_time:.2f}", status, description
+        ])
 
+# ── Logging: Error Taxonomy ────────────────────────────────
+def log_error(run_number, error_msg):
+    """Log detailed error information to errors.log."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open(ERROR_FILE, "a") as f:
+        f.write(f"--- RUN #{run_number} | {timestamp} ---\n")
+        f.write(f"ERROR: {error_msg}\n")
+        f.write(f"TRACEBACK:\n{traceback.format_exc()}\n\n")
 
-# ── Plotting ───────────────────────────────────────────────
+# ── Plotting: Metric-Over-Time Plot ────────────────────────
 def plot_results(save_path="performance.png"):
-    """Plot validation AUC and F1 over experiments."""
+    """Generate the AUC-over-time graph."""
     if not os.path.exists(RESULTS_FILE):
-        print("No results.tsv found. Run some experiments first.")
         return
 
-    experiments, aucs, f1s, statuses, descriptions = [], [], [], [], []
+    runs, aucs = [], []
     with open(RESULTS_FILE) as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
-            experiments.append(row["experiment"])
-            aucs.append(float(row["val_auc"]))
-            f1s.append(float(row["val_f1"]))
-            statuses.append(row["status"])
-            descriptions.append(row["description"])
+            runs.append(int(row["run_number"]))
+            aucs.append(float(row["auc_score"]))
 
-    color_map = {"keep": "#2ecc71", "discard": "#e74c3c", "baseline": "#3498db"}
-    colors = [color_map.get(s, "#95a5a6") for s in statuses]
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
-
-    # ── Top: ROC AUC ──
-    ax1.scatter(range(len(aucs)), aucs, c=colors, s=80, zorder=3, edgecolors="white", linewidth=0.5)
-    ax1.plot(range(len(aucs)), aucs, "k--", alpha=0.2, zorder=2)
-
-    best_auc = []
-    current_best_auc = -float("inf")
-    for a in aucs:
-        current_best_auc = max(current_best_auc, a)
-        best_auc.append(current_best_auc)
-    ax1.plot(range(len(aucs)), best_auc, color="#2ecc71", linewidth=2.5, label="Best so far")
-
-    ax1.set_ylabel("Validation ROC AUC", fontsize=12)
-    ax1.set_title("AutoResearch: Consumer Purchase Behavior", fontsize=14, fontweight="bold")
-    ax1.grid(True, alpha=0.3)
-    ax1.set_ylim(min(aucs) * 0.95, 1.0)
-
-    # ── Bottom: F1-Score ──
-    ax2.scatter(range(len(f1s)), f1s, c=colors, s=80, zorder=3, edgecolors="white", linewidth=0.5)
-    ax2.plot(range(len(f1s)), f1s, "k--", alpha=0.2, zorder=2)
-
-    best_f1 = []
-    current_best_f1 = -float("inf")
-    for f in f1s:
-        current_best_f1 = max(current_best_f1, f)
-        best_f1.append(current_best_f1)
-    ax2.plot(range(len(f1s)), best_f1, color="#2ecc71", linewidth=2.5, label="Best so far")
-
-    ax2.set_xlabel("Experiment #", fontsize=12)
-    ax2.set_ylabel("Validation F1-Score", fontsize=12)
-    ax2.grid(True, alpha=0.3)
-    ax2.set_ylim(min(f1s) * 0.95, max(f1s) * 1.1)
-
-    # Labels and Legends
-    short_labels = [d[:22] + ".." if len(d) > 24 else d for d in descriptions]
-    ax2.set_xticks(range(len(aucs)))
-    ax2.set_xticklabels(short_labels, rotation=45, ha="right", fontsize=8)
-
-    from matplotlib.lines import Line2D
-    legend_elements = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="#3498db", markersize=10, label="baseline"),
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="#2ecc71", markersize=10, label="keep (improved)"),
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="#e74c3c", markersize=10, label="discard (regressed)"),
-        Line2D([0], [0], color="#2ecc71", linewidth=2.5, label="Best so far"),
-    ]
-    ax1.legend(handles=legend_elements, loc="lower right", fontsize=9)
-
+    plt.figure(figsize=(10, 6))
+    plt.plot(runs, aucs, marker='o', linestyle='-', color='#3498db', linewidth=2, label="Validation AUC")
+    
+    # Plot 'Best so far' line
+    best_aucs = np.maximum.accumulate(aucs)
+    plt.step(runs, best_aucs, where='post', color='#2ecc71', linewidth=2, label="Best Score")
+    
+    plt.title("Metric Over Time: AutoResearch Progress", fontsize=14)
+    plt.xlabel("Experiment Run Number", fontsize=12)
+    plt.ylabel("Validation AUC Score", fontsize=12)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    print(f"Saved tracking plot to {save_path}")
-
+    plt.savefig(save_path, dpi=150)
+    plt.close()
 
 if __name__ == "__main__":
     plot_results()
