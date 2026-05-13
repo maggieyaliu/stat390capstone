@@ -80,27 +80,34 @@ def count_features(model, X_train=None):
 
 
 def extract_model_metadata(model, description=""):
-    """Build compact model metadata string for results.tsv."""
+    """Build concise model metadata string for results.tsv."""
     try:
         estimator = model.named_steps.get("model", model)
     except Exception:
         estimator = model
 
     model_name = estimator.__class__.__name__
-    params = {}
     try:
         params = estimator.get_params(deep=False)
     except Exception:
         params = {}
 
-    key_params = []
-    for key in sorted(params.keys()):
-        val = params[key]
-        if isinstance(val, (str, int, float, bool)) or val is None:
-            key_params.append(f"{key}={val}")
+    whitelist = {
+        "n_estimators", "criterion", "max_depth", "max_features",
+        "min_samples_leaf", "min_samples_split", "class_weight",
+        "learning_rate", "max_iter", "l2_regularization",
+        "C", "solver", "penalty", "ccp_alpha", "random_state"
+    }
 
-    joined = ", ".join(key_params)
-    metadata = f"model={model_name}; params=[{joined}]"
+    parts = []
+    for key in sorted(whitelist):
+        if key in params:
+            val = params[key]
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                parts.append(f"{key}={val}")
+
+    param_text = ", ".join(parts)
+    metadata = f"model={model_name}; {param_text}" if param_text else f"model={model_name}"
     if description:
         metadata = f"{description} | {metadata}"
     return metadata
@@ -170,10 +177,12 @@ def plot_results(results_file=RESULTS_FILE, save_path=PLOT_FILE):
     aucs = [aucs[i] for i in order]
 
     best_aucs = np.maximum.accumulate(aucs)
+    baseline_auc = aucs[0]
 
     plt.figure(figsize=(10, 6))
     plt.plot(runs, aucs, marker="o", linewidth=2, color="#1f77b4", label="Validation AUC")
     plt.step(runs, best_aucs, where="post", linewidth=2, color="#2ca02c", label="Best so far")
+    plt.axhline(baseline_auc, color="#d62728", linestyle="--", linewidth=2, label=f"Baseline AUC ({baseline_auc:.4f})")
     plt.title("Metric Over Time")
     plt.xlabel("Experiment Number")
     plt.ylabel("Validation AUC")
