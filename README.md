@@ -1,35 +1,98 @@
-# Online Shoppers Purchasing Intention - Baseline Model
+# Consumer Purchase Behavior Prediction: Baseline to AutoResearch Optimization
 
-This project establishes a predictive baseline for consumer conversion behavior using the [UCI Online Shoppers Purchasing Intention Dataset](https://archive.ics.uci.edu/dataset/468/online+shoppers+purchasing+intention+dataset). The goal is to evaluate how well a standard linear model can estimate the likelihood of a purchase based on session-level browsing patterns.
+This repository contains the end-to-end machine learning pipeline for predicting online session-level purchase intent (`Revenue`) using the [UCI Online Shoppers Purchasing Intention Dataset](https://archive.ics.uci.edu/dataset/468/online+shoppers+purchasing+intention+dataset).
 
-## 1. Project Setup
+Through an automated research loop comprising 35 tracked experiments, we optimized a baseline model to handle severe class imbalance and feature selection constraints.
+
+## 1. Project Setup & Infrastructure
 
 To run the code, you will need **Python 3.8+** and the following libraries installed:
+
 * `pandas`
 * `numpy`
 * `scikit-learn`
 
 Install the dependencies via your terminal:
-`pip install pandas numpy scikit-learn`
 
-## 2. Data Acquisition
+```bash
+pip install pandas numpy scikit-learn
 
-The first step is to load the dataset. The system reads the CSV file from the local directory and verifies the dimensions of the data to ensure the file was read correctly.
+```
 
-## 3. Methodology (Preprocessing)
+Note: Due to the automated nature of the experiment loop, using pinned environment dependencies is highly recommended to avoid runtime instability.
 
-This baseline focuses on real-time behavioral metrics rather than seasonal trends. 
-* **Feature Selection:** The `Month` variable is excluded to remove seasonal bias.
-* **Numerical Scaling:** Features like `PageValues` and `ExitRates` are standardized using a `StandardScaler`.
-* **Categorical Encoding:** Features like `VisitorType` and `TrafficType` are transformed into binary vectors via `OneHotEncoder`.
-* **Validation Strategy:** The dataset is split using an 80/20 ratio. A stratified split is used to account for the class imbalance, as only ~15% of sessions result in revenue.
+## 2. Experimental Protocol & Data Split
 
-## 4. Execution (Model Training)
+The dataset consists of 12,330 single-user sessions with a severe 84.5% majority-class imbalance of non-purchasers. Following project rules, the feature `Month` is explicitly excluded from all pipelines to isolate behavioral metrics from seasonal bias.
 
-The model is built using a **Logistic Regression** algorithm wrapped in a Scikit-Learn Pipeline. This ensures that the preprocessing steps (scaling and encoding) are applied consistently to the test data without data leakage. The model is trained using a maximum of 1,000 iterations to ensure convergence.
+* **Development Set:** A stratified train/validation split generated from `online_shoppers_WORK.csv`.
 
-## 5. Evaluation (Expected Results)
 
-The model is evaluated using two primary metrics to establish a rigorous benchmark:
-* **ROC AUC Score:** Measures the model's ability to distinguish between a buyer and a non-buyer. The expected baseline is **~0.88**.
-* **Classification Report:** Provides Precision and Recall. While Precision is generally high, the baseline **Recall** for purchasers is typically low (**~36%**), marking it as the key area for future improvement.
+* **Final Holdout Set:** A completely held-out, evaluation-ready `online_shoppers_LOCKED.csv`.
+
+
+
+## 3. Methodology & Search Space
+
+We transitioned from a basic linear model to a fully automated research loop, editing only `model.py` across execution cycles:
+
+1. **Baseline Phase:** A standard `LogisticRegression` pipeline with robust scaling (`StandardScaler`) and categorical encoding (`OneHotEncoder`). Established an initial validation performance of **~0.88 AUC**.
+
+
+2. **AutoResearch Loop:** 35 tracked sequential experiments primarily exploring Random Forest hyperparameter configurations, boosting variants, and feature counts.
+
+
+3. **Ablation Focus:** Evaluated feature-count optimization (narrowing down to 62–65 transformed features) alongside explicit class-imbalance interventions comparing synthetic oversampling (`SMOTE`) against algorithmic class-weighting pipelines.
+
+
+
+## 4. Tracking Artifacts
+
+Every execution cycle in the loop strictly updates and logs the following artifacts to preserve reproducibility:
+
+* `results.tsv`: Tracks run ID, ROC AUC, F1 score, active feature counts, and model runtime metadata.
+
+
+* `metric_over_time.png`: A live visualization mapping the validation AUC trajectory against the original baseline.
+
+
+* `errors.log`: A runtime taxonomy error log used to guide agent adjustment strategies.
+
+
+
+## 5. Final Key Results
+
+### Best Validation Configuration (Run #26)
+
+The highest performing validation setup was a tuned **Random Forest Classifier** utilizing an entropy criterion, 800 estimators, and a `balanced_subsample` class-weighting framework over a restricted subset of **63 features**.
+
+* **Validation AUC:** **0.918567** 
+
+
+* **Validation F1:** 0.646465 
+
+
+
+### Locked Test Generalization (Run #35)
+
+Evaluating the champion configuration unchanged on the locked test set yielded strong out-of-sample stability:
+
+* **Locked Test AUC:** **0.901138** 
+
+
+* **Locked Test F1:** 0.640327 
+
+
+* **Test Prediction Inference Runtime:** 8.444 seconds 
+
+
+
+## 6. Main Takeaways
+
+* **Ensembles Win:** Random Forest architectures significantly outpaced linear benchmarks when charting complex web analytics behavior.
+
+
+* **Simplicity over Complexity:** Algorithmic class-weighting (`balanced_subsample`) consistently yielded a higher AUC ceiling than heavier, computationally intense SMOTE pipelines.
+
+
+* **Feature Pruning:** Trimming irrelevant dimensions to a tight 63-feature space optimized the model's predictive ceiling without destroying metric representations.
